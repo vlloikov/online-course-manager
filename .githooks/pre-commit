@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+git diff --cached --check
+
+git diff --cached --name-only --diff-filter=ACMR -z -- '*.cpp' '*.hpp' '*.h' |
+    (
+        if ! IFS= read -r -d '' path; then
+            exit 0
+        fi
+
+        formatter=clang-format-18
+        if ! command -v "$formatter" >/dev/null; then
+            formatter=clang-format
+        fi
+        if ! command -v "$formatter" >/dev/null; then
+            printf 'Install clang-format to check C++ formatting.\n' >&2
+            exit 1
+        fi
+
+        style_file=$(mktemp)
+        trap 'rm -f -- "$style_file"' EXIT
+        git show ':.clang-format' > "$style_file"
+
+        while true; do
+            if ! git show ":$path" | "$formatter" --style="file:$style_file" \
+                --assume-filename="$path" --dry-run --Werror; then
+                printf 'Format %q with %s -i and stage it again.\n' "$path" "$formatter" >&2
+                exit 1
+            fi
+            IFS= read -r -d '' path || break
+        done
+    )

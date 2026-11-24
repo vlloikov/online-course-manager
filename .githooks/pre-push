@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+check_commit() (
+    commit_dir=$(mktemp -d)
+    trap 'rm -rf -- "$commit_dir"' EXIT
+
+    mkdir "$commit_dir/source"
+    git archive "$1" | tar -xf - -C "$commit_dir/source"
+
+    cmake -S "$commit_dir/source" -B "$commit_dir/build" -DCMAKE_BUILD_TYPE=Debug
+    cmake --build "$commit_dir/build" --parallel
+    ctest --test-dir "$commit_dir/build" --output-on-failure --no-tests=error
+)
+
+while read -r local_ref local_oid remote_ref remote_oid; do
+    if [[ "$local_ref" == '(delete)' ]]; then
+        continue
+    fi
+    if ! commit=$(git rev-parse --verify --quiet "${local_oid}^{commit}"); then
+        continue
+    fi
+    if ! git cat-file -e "$commit:CMakeLists.txt" 2>/dev/null; then
+        printf 'Skipping build for %s because it has no CMakeLists.txt.\n' "$local_ref"
+        continue
+    fi
+
+    printf 'Building and testing %s (%s) before push.\n' "$local_ref" "${commit:0:12}"
+    check_commit "$commit" </dev/null
+done
